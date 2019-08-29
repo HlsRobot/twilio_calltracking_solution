@@ -1,0 +1,8 @@
+twilio:
+  account_sid: <TWILIO ACCOUNT SID>
+  flow_sid: <TWILIO_STUDIO_FLOW_SID>
+  auth_token: <TWILIO AUTH TOKEN>
+  twilio_number: <TWILIO PHONE NUMBER>
+  url: <NGROK URL OR YOUR SERVER URL>
+server:
+  port: ${PORT:8080}
