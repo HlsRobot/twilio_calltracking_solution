@@ -13,7 +13,7 @@ public class RelationUpdater {
         Http http = new Http();
         HttpRequest request = new HttpRequest();
         
-        request.setEndpoint('https://stziallas.ngrok.io/broker/write');
+        request.setEndpoint('BACKEND_URL/broker/write');
         request.setMethod('POST');
         request.setHeader('Content-Type', 'application/json;charset=UTF-8');
         
@@ -21,8 +21,7 @@ public class RelationUpdater {
         HttpResponse response = http.send(request);
         
         if (response.getStatusCode() == 200) {
-            System.debug(response.getBody());
-           
+
             JSONParser parser = JSON.createParser(response.getBody());
             String ID = '';
             String twilioNumber = '';
@@ -41,9 +40,6 @@ public class RelationUpdater {
                 }
             }
           
-            System.debug(ID);
-            System.debug(twilioNumber);           
-            //update new A__c(Id = '474xxxxxxx', F__c = 'Some Value');
             update new Zugeh_rige_Makler__c(Id = ID, Call_Tracking_Nummer__c = twilioNumber);
         } 
     }

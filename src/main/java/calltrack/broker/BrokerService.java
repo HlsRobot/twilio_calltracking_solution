@@ -10,7 +10,6 @@ import com.twilio.twiml.TwiMLException;
 import com.twilio.twiml.VoiceResponse;
 import com.twilio.twiml.voice.Dial;
 import com.twilio.twiml.voice.Say;
-import com.twilio.twiml.voice.SsmlLang;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -36,7 +35,8 @@ import java.util.stream.IntStream;
 public class BrokerService {
 
     private final TwilioConfiguration twilioConfiguration;
-    private final List<String> availablePhoneNumbers = Arrays.asList(new String[]{"+4915735990252", "+4915735999590", "+4915735996207", "+4915735999153"});
+    //List of available Twilio numbers in the account see: https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource#read-multiple-incomingphonenumber-resources
+    private final List<String> availablePhoneNumbers = new ArrayList<>();
     static final String USERNAME     = "SALESFORCE_USERNAME";
     static final String PASSWORD     = "SALESFORCE_PASSWORD";
     static final String LOGINURL     = "https://login.salesforce.com";
@@ -51,6 +51,8 @@ public class BrokerService {
         this.twilioConfiguration = twilioConfiguration;
     }
 
+    //Check existing Seller - Broker relations and compare them to the newly created one.
+    //Required in cas that an existing relation is updated with a new SFDC ID etc.
     private RelationDTO checkRelations(final String caller, final String twilioNumber) throws IOException {
         List<RelationDTO> relationList = this.readJsonFile();
 
@@ -72,30 +74,27 @@ public class BrokerService {
 
     }
 
+    //Helper methods for the current demo that read a Json list that simulates a DB
     private List<RelationDTO> readJsonFile() throws IOException {
         Gson gson = new Gson();
 
         try (FileReader fileReader = new FileReader("relations.json")){
-            List<RelationDTO> relationList = gson.fromJson(fileReader, new TypeToken<List<RelationDTO>>() {}.getType());
-
-            return relationList;
+            return gson.fromJson(fileReader, new TypeToken<List<RelationDTO>>() {}.getType());
         }
     }
 
+    //Helper methods for the current demo that edits a Json list that simulates a DB
     private void writeJsonFile(List<RelationDTO> relationList) throws IOException {
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
-
-        String json = gson.toJson(relationList);
-        System.out.println(json);
-
         try (FileWriter fileWriter = new FileWriter("relations.json")) {
             gson.toJson(relationList, fileWriter);
         }
     }
 
+    //Main method that receives a request from SFDC (Apex class) with a newly created relation,
+    // analyse it, convert it to DTO and stores it in the "DB"
     void updateDBFromSFDC(final HttpServletRequest request, final HttpServletResponse response) throws IOException {
-        //TODO expect object request from SFDC, analyse object, convert to DTO, invoke writeJson function
         Map<String, String[]> parameters = request.getParameterMap();
         String bodyStringJson = request.getReader().lines().collect(Collectors.joining(System.lineSeparator()));
 
@@ -127,7 +126,6 @@ public class BrokerService {
                     break;
                 }
             }
-            //newRelation.setTwilioNumber("12345");
             relationList.add(newRelation);
         }
 
@@ -143,14 +141,16 @@ public class BrokerService {
         }
     }
 
+    //Main method that Twilio invokes when a PSTN Call is initiated. It contains the information of the caller and the Twilio Number called
+    //The combination of the two numbers can help to search the "DB" for existing active relations.
+    // If found in connects the call to the second participant in the relation else it provides an automated message to the caller.
     void initProxyCall(final HttpServletRequest request, final HttpServletResponse response) throws IOException {
         Map<String, String[]> parameterMap = request.getParameterMap();
         String caller = request.getParameter("Caller");
         String twilioNumber = request.getParameter("Called");
         RelationDTO relation = this.checkRelations(caller, twilioNumber);
 
-        System.out.println(relation);
-        String sayString = "Hi, welcome to Immobilien scout. You are now being connected with ";
+        String sayString = "You are now being connected with ";
         if (relation.isActive()) {
             Dial dial;
             Say say;
@@ -160,8 +160,6 @@ public class BrokerService {
                         .callerId(request.getParameter("Called"))
                         .timeout(15)
                         .build();
-                SsmlLang ssmlLang = new SsmlLang.Builder("Immobilien")
-                        .lang(new SsmlLang.Builder("DE_DE").build()).build();
                 say = new Say.Builder(sayString + relation.getBrokerName()).voice(Say.Voice.POLLY_AMY).build();
             } else {
                 dial = new Dial.Builder(relation.getSellerPhone())
@@ -195,6 +193,8 @@ public class BrokerService {
 
     }
 
+    //After a PSTN call is finished Twilio is invoking this method that provides information required like the call status, duration etc.
+    //The information is then packed in Json and sent to SFDC to be stored in a record.
     void logCallInSFDC(final HttpServletRequest request, final HttpServletResponse response) throws IOException {
 
         Map<String, String[]> parameters = request.getParameterMap();
@@ -208,7 +208,6 @@ public class BrokerService {
                 .build();
 
         // Assemble the request URL
-        //String updateURL = DOMAINNAME + "/services/data/v53.0/sobjects/" + object + request.getParameter("id");
         String updateURL = DOMAINNAME + "/services/data/v53.0/sobjects/" + object + "/" + request.getParameter("id");
 
 
@@ -227,8 +226,6 @@ public class BrokerService {
             cpException.printStackTrace();
         }
 
-        System.out.println(responseFromSFDC);
-
         if (responseFromSFDC.getStatusLine().getStatusCode() != HttpStatus.SC_NO_CONTENT) {
             System.out.println("Error authenticating to Force.com: " + responseFromSFDC.getStatusLine().getStatusCode());
             // Error is in EntityUtils.toString(response.getEntity())
@@ -237,6 +234,7 @@ public class BrokerService {
 
     }
 
+    //Standard Java method to generate an auth token from Salesforce.
     private String getSFDCToken() throws IOException {
         CloseableHttpClient httpclient = HttpClientBuilder.create().build();
 
@@ -271,18 +269,14 @@ public class BrokerService {
         String getResult = null;
         try {
             getResult = EntityUtils.toString(response.getEntity());
-            System.out.println(getResult);
         } catch (IOException ioException) {
             ioException.printStackTrace();
         }
         Gson gson = new Gson();
         JsonObject jsonObject = gson.fromJson(getResult, JsonObject.class);
-        System.out.println(jsonObject);
-        System.out.println(jsonObject.get("access_token"));
         httpPost.releaseConnection();
 
         String accessToken = jsonObject.get("access_token").toString();
-        //accessToken = accessToken.replaceAll("\"", "");
         return accessToken.replaceAll("\"", "");
     }
 
